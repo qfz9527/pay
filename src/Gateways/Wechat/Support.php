@@ -2,7 +2,9 @@
 
 namespace Yansongda\Pay\Gateways\Wechat;
 
+use Exception;
 use Yansongda\Pay\Events;
+use Yansongda\Pay\Exceptions\BusinessException;
 use Yansongda\Pay\Exceptions\GatewayException;
 use Yansongda\Pay\Exceptions\InvalidArgumentException;
 use Yansongda\Pay\Exceptions\InvalidSignException;
@@ -10,6 +12,7 @@ use Yansongda\Pay\Gateways\Wechat;
 use Yansongda\Pay\Log;
 use Yansongda\Supports\Collection;
 use Yansongda\Supports\Config;
+use Yansongda\Supports\Str;
 use Yansongda\Supports\Traits\HasHttpRequest;
 
 /**
@@ -92,12 +95,18 @@ class Support
      *
      * @param Config $config
      *
+     * @throws GatewayException
+     * @throws InvalidArgumentException
+     * @throws InvalidSignException
+     *
      * @return Support
      */
     public static function create(Config $config)
     {
         if (php_sapi_name() === 'cli' || !(self::$instance instanceof self)) {
             self::$instance = new self($config);
+
+            self::setDevKey();
         }
 
         return self::$instance;
@@ -128,7 +137,7 @@ class Support
      *
      * @return void
      */
-    public function clear()
+    public static function clear()
     {
         self::$instance = null;
     }
@@ -150,7 +159,7 @@ class Support
      */
     public static function requestApi($endpoint, $data, $cert = false): Collection
     {
-        Events::dispatch(Events::API_REQUESTING, new Events\ApiRequesting('Wechat', '', self::$instance->getBaseUri(), $data));
+        Events::dispatch(Events::API_REQUESTING, new Events\ApiRequesting('Wechat', '', self::$instance->getBaseUri().$endpoint, $data));
 
         $result = self::$instance->post(
             $endpoint,
@@ -162,23 +171,9 @@ class Support
         );
         $result = is_array($result) ? $result : self::fromXml($result);
 
-        Events::dispatch(Events::API_REQUESTED, new Events\ApiRequested('Wechat', '', self::$instance->getBaseUri(), $result));
+        Events::dispatch(Events::API_REQUESTED, new Events\ApiRequested('Wechat', '', self::$instance->getBaseUri().$endpoint, $result));
 
-        if (!isset($result['return_code']) || $result['return_code'] != 'SUCCESS' || $result['result_code'] != 'SUCCESS') {
-            throw new GatewayException(
-                'Get Wechat API Error:'.($result['return_msg'] ?? $result['retmsg']).($result['err_code_des'] ?? ''),
-                $result,
-                20000
-            );
-        }
-
-        if (strpos($endpoint, 'mmpaymkttransfers') !== false || self::generateSign($result) === $result['sign']) {
-            return new Collection($result);
-        }
-
-        Events::dispatch(Events::SIGN_FAILED, new Events\SignFailed('Wechat', '', $result));
-
-        throw new InvalidSignException('Wechat Sign Verify FAILED', $result);
+        return self::processingApiResult($endpoint, $result);
     }
 
     /**
@@ -394,6 +389,76 @@ class Support
     public function getBaseUri()
     {
         return $this->baseUri;
+    }
+
+    /**
+     * processingApiResult.
+     *
+     * @author yansongda <me@yansongda.cn>
+     *
+     * @param       $endpoint
+     * @param array $result
+     *
+     * @throws GatewayException
+     * @throws InvalidArgumentException
+     * @throws InvalidSignException
+     *
+     * @return Collection
+     */
+    protected static function processingApiResult($endpoint, array $result)
+    {
+        if (!isset($result['return_code']) || $result['return_code'] != 'SUCCESS') {
+            throw new GatewayException(
+                'Get Wechat API Error:'.($result['return_msg'] ?? $result['retmsg'] ?? ''),
+                $result
+            );
+        }
+
+        if (isset($result['result_code']) && $result['result_code'] != 'SUCCESS') {
+            throw new BusinessException(
+                'Wechat Business Error: '.$result['err_code'].' - '.$result['err_code_des'],
+                $result
+            );
+        }
+
+        if ($endpoint === 'pay/getsignkey' ||
+            strpos($endpoint, 'mmpaymkttransfers') !== false ||
+            self::generateSign($result) === $result['sign']) {
+            return new Collection($result);
+        }
+
+        Events::dispatch(Events::SIGN_FAILED, new Events\SignFailed('Wechat', '', $result));
+
+        throw new InvalidSignException('Wechat Sign Verify FAILED', $result);
+    }
+
+    /**
+     * setDevKey.
+     *
+     * @author yansongda <me@yansongda.cn>
+     *
+     * @throws GatewayException
+     * @throws InvalidArgumentException
+     * @throws InvalidSignException
+     * @throws Exception
+     *
+     * @return Support
+     */
+    private static function setDevKey()
+    {
+        if (self::$instance->mode == Wechat::MODE_DEV) {
+            $data = [
+                'mch_id'    => self::$instance->mch_id,
+                'nonce_str' => Str::random(),
+            ];
+            $data['sign'] = self::generateSign($data);
+
+            $result = self::requestApi('pay/getsignkey', $data);
+
+            self::$instance->config->set('key', $result['sandbox_signkey']);
+        }
+
+        return self::$instance;
     }
 
     /**

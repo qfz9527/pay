@@ -7,9 +7,12 @@ use Symfony\Component\HttpFoundation\Response;
 use Yansongda\Pay\Contracts\GatewayApplicationInterface;
 use Yansongda\Pay\Contracts\GatewayInterface;
 use Yansongda\Pay\Events;
+use Yansongda\Pay\Exceptions\GatewayException;
+use Yansongda\Pay\Exceptions\InvalidConfigException;
 use Yansongda\Pay\Exceptions\InvalidGatewayException;
 use Yansongda\Pay\Exceptions\InvalidSignException;
 use Yansongda\Pay\Gateways\Alipay\Support;
+use Yansongda\Pay\Log;
 use Yansongda\Supports\Collection;
 use Yansongda\Supports\Config;
 use Yansongda\Supports\Str;
@@ -68,21 +71,19 @@ class Alipay implements GatewayApplicationInterface
     {
         $this->gateway = Support::create($config)->getBaseUri();
         $this->payload = [
-            'app_id'      => $config->get('app_id'),
-            'method'      => '',
-            'format'      => 'JSON',
-            'charset'     => 'utf-8',
-            'sign_type'   => 'RSA2',
-            'version'     => '1.0',
-            'return_url'  => $config->get('return_url'),
-            'notify_url'  => $config->get('notify_url'),
-            'timestamp'   => date('Y-m-d H:i:s'),
-            'sign'        => '',
-            'biz_content' => '',
+            'app_id'         => $config->get('app_id'),
+            'method'         => '',
+            'format'         => 'JSON',
+            'charset'        => 'utf-8',
+            'sign_type'      => 'RSA2',
+            'version'        => '1.0',
+            'return_url'     => $config->get('return_url'),
+            'notify_url'     => $config->get('notify_url'),
+            'timestamp'      => date('Y-m-d H:i:s'),
+            'sign'           => '',
+            'biz_content'    => '',
+            'app_auth_token' => $config->get('app_auth_token'),
         ];
-        if (!empty($config->get('app_auth_token'))) {
-            $this->payload['app_auth_token'] = $config->get('app_auth_token');
-        }
     }
 
     /**
@@ -143,7 +144,7 @@ class Alipay implements GatewayApplicationInterface
      * @param bool       $refund
      *
      * @throws InvalidSignException
-     * @throws \Yansongda\Pay\Exceptions\InvalidConfigException
+     * @throws InvalidConfigException
      *
      * @return Collection
      */
@@ -177,28 +178,41 @@ class Alipay implements GatewayApplicationInterface
      * @author yansongda <me@yansongda.cn>
      *
      * @param string|array $order
-     * @param bool         $refund
-     * @param bool         $transfer
+     * @param string       $type
+     * @param bool         $transfer @deprecated since v2.7.3
      *
+     * @throws GatewayException
+     * @throws InvalidConfigException
      * @throws InvalidSignException
-     * @throws \Yansongda\Pay\Exceptions\GatewayException
-     * @throws \Yansongda\Pay\Exceptions\InvalidConfigException
      *
      * @return Collection
      */
-    public function find($order, $refund = false, $transfer = false): Collection
+    public function find($order, $type = 'wap', $transfer = false): Collection
     {
-        $method = 'alipay.trade.query';
-        $requestOrder = is_array($order) ? $order : ['out_trade_no' => $order];
-        if ($refund) {
-            $method = 'alipay.trade.fastpay.refund.query';
+        if ($type === true || $transfer) {
+            Log::warning('DEPRECATED: In Alipay->find(), the REFUND/TRANSFER param is deprecated since v2.7.3, use TYPE param instead!');
+            @trigger_error('In yansongda/pay Alipay->find(), the REFUND/TRANSFER param is deprecated since v2.7.3, use TYPE param instead!', E_USER_DEPRECATED);
+
+            $type = $type === true ? 'refund' : 'transfer';
         }
-        if ($transfer) {
-            $requestOrder = is_array($order) ? $order : ['out_biz_no' => $order];
-            $method = 'alipay.fund.trans.order.query';
+
+        if ($type === false) {
+            Log::warning('DEPRECATED: In Alipay->find(), the REFUND/TRANSFER param is deprecated since v2.7.3, use TYPE param instead!');
+            @trigger_error('In yansongda/pay Alipay->find(), the REFUND/TRANSFER param is deprecated since v2.7.3, use TYPE param instead!', E_USER_DEPRECATED);
+
+            $type = 'wap';
         }
-        $this->payload['method'] = $method;
-        $this->payload['biz_content'] = json_encode($requestOrder);
+
+        $gateway = get_class($this).'\\'.Str::studly($type).'Gateway';
+
+        if (!class_exists($gateway) || !is_callable([new $gateway(), 'find'])) {
+            throw new GatewayException("{$gateway} Done Not Exist Or Done Not Has FIND Method");
+        }
+
+        $config = call_user_func([new $gateway(), 'find'], $order);
+
+        $this->payload['method'] = $config['method'];
+        $this->payload['biz_content'] = $config['biz_content'];
         $this->payload['sign'] = Support::generateSign($this->payload);
 
         Events::dispatch(Events::METHOD_CALLED, new Events\MethodCalled('Alipay', 'Find', $this->gateway, $this->payload));
@@ -213,9 +227,9 @@ class Alipay implements GatewayApplicationInterface
      *
      * @param array $order
      *
+     * @throws GatewayException
+     * @throws InvalidConfigException
      * @throws InvalidSignException
-     * @throws \Yansongda\Pay\Exceptions\GatewayException
-     * @throws \Yansongda\Pay\Exceptions\InvalidConfigException
      *
      * @return Collection
      */
@@ -235,11 +249,11 @@ class Alipay implements GatewayApplicationInterface
      *
      * @author yansongda <me@yansongda.cn>
      *
-     * @param string|array $order
+     * @param array $order
      *
+     * @throws GatewayException
+     * @throws InvalidConfigException
      * @throws InvalidSignException
-     * @throws \Yansongda\Pay\Exceptions\GatewayException
-     * @throws \Yansongda\Pay\Exceptions\InvalidConfigException
      *
      * @return Collection
      */
@@ -257,13 +271,13 @@ class Alipay implements GatewayApplicationInterface
     /**
      * Close an order.
      *
-     * @author yansongda <me@yansongda.cn>
-     *
      * @param string|array $order
      *
+     * @author yansongda <me@yansongda.cn>
+     *
+     * @throws GatewayException
+     * @throws InvalidConfigException
      * @throws InvalidSignException
-     * @throws \Yansongda\Pay\Exceptions\GatewayException
-     * @throws \Yansongda\Pay\Exceptions\InvalidConfigException
      *
      * @return Collection
      */
@@ -285,9 +299,9 @@ class Alipay implements GatewayApplicationInterface
      *
      * @param string|array $bill
      *
+     * @throws GatewayException
+     * @throws InvalidConfigException
      * @throws InvalidSignException
-     * @throws \Yansongda\Pay\Exceptions\GatewayException
-     * @throws \Yansongda\Pay\Exceptions\InvalidConfigException
      *
      * @return string
      */
@@ -316,6 +330,20 @@ class Alipay implements GatewayApplicationInterface
         Events::dispatch(Events::METHOD_CALLED, new Events\MethodCalled('Alipay', 'Success', $this->gateway));
 
         return Response::create('success');
+    }
+
+    /**
+     * extend.
+     *
+     * @author yansongda <me@yansongda.cn>
+     *
+     * @param string   $method
+     * @param callable $function
+     *
+     * @return void
+     */
+    public function extend(string $method, callable $function)
+    {
     }
 
     /**

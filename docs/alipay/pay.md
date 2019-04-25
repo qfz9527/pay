@@ -23,6 +23,7 @@ $order = [
     'out_trade_no' => time(),
     'total_amount' => '0.01',
     'subject'      => 'test subject-测试订单',
+    // 'http_method'  => 'GET' // 如果想在 wap 支付时使用 GET 方式提交，请加上此参数。默认使用 POST 方式提交
 ];
 
 return $alipay->web($order)->send(); // laravel 框架中请直接 return $alipay->web($order)
@@ -43,6 +44,7 @@ $order = [
     'out_trade_no' => time(),
     'total_amount' => '0.01',
     'subject'      => 'test subject-测试订单',
+    // 'http_method'  => 'GET' // 如果想在 wap 支付时使用 GET 方式提交，请加上此参数。默认使用 POST 方式提交
 ];
 
 return $alipay->wap($order)->send(); // laravel 框架中请直接 return $alipay->wap($order)
@@ -130,6 +132,24 @@ $order = [
 ];
 
 $result = $alipay->transfer($order);
+```
+
+### 查询转账订单
+
+> v2.5.2 及以上可用
+
+```PHP
+$order = [
+    'out_trade_no' => '1514027114',
+];
+
+// $order = '1514027114';
+
+// v2.7.2 及以下版本请使用
+// $result = $alipay->find($order, false, true);
+
+// v2.7.3 及以上版本请使用
+$result = $alipay->find($order, 'transfer');
 ```
 
 ### 订单配置参数

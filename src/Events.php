@@ -2,6 +2,7 @@
 
 namespace Yansongda\Pay;
 
+use Exception;
 use Symfony\Component\EventDispatcher\Event;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -28,21 +29,21 @@ class Events
     const PAY_STARTING = 'yansongda.pay.starting';
 
     /**
-     * Before pay.
+     * Pay started.
      *
      * @Event("Yansongda\Pay\Events\PayStarted")
      */
     const PAY_STARTED = 'yansongda.pay.started';
 
     /**
-     * Paying.
+     * Api requesting.
      *
      * @Event("Yansongda\Pay\Events\ApiRequesting")
      */
     const API_REQUESTING = 'yansongda.pay.api.requesting';
 
     /**
-     * Paid.
+     * Api requested.
      *
      * @Event("Yansongda\Pay\Events\ApiRequested")
      */
@@ -84,7 +85,7 @@ class Events
      * @param string $method
      * @param array  $args
      *
-     * @throws \Exception
+     * @throws Exception
      *
      * @return mixed
      */
@@ -101,7 +102,7 @@ class Events
      * @param string $method
      * @param array  $args
      *
-     * @throws \Exception
+     * @throws Exception
      *
      * @return mixed
      */
